@@ -68,9 +68,6 @@ global messagedb
 #{contac_addr:{dc_id:{dc_msg:tg_msg}}}
 messagedb = {}
 
-global imessagedb
-#{contac_addr:{dc_id:{tg_msg:dc_msg}}}
-imessagedb = {}
 
 global autochatsdb
 #{contact_addr:{dc_id:tg_id}}
@@ -145,20 +142,13 @@ def deltabot_start(bot: DeltaBot) -> None:
    
 def register_msg(contacto, dc_id, dc_msg, tg_msg):
    global messagedb
-   global imessagedb
    #{contac_addr:{dc_id:{dc_msg:tg_msg}}}
    if contacto not in messagedb:
       messagedb[contacto] = {}   
    if dc_id not in messagedb[contacto]:
       messagedb[contacto][dc_id] = {}
       
-   if contacto not in imessagedb:
-      imessagedb[contacto] = {}   
-   if dc_id not in imessagedb[contacto]:
-      imessagedb[contacto][dc_id] = {}
-      
    messagedb[contacto][dc_id][dc_msg] = tg_msg
-   imessagedb[contacto][dc_id][tg_msg] = dc_msg
    
 def is_register_msg(contacto, dc_id, dc_msg):
    if contacto in messagedb:
@@ -173,12 +163,14 @@ def is_register_msg(contacto, dc_id, dc_msg):
    else:
       return
       
-def iis_register_msg(contacto, dc_id, tg_msg):
-   if contacto in imessagedb:
-      if dc_id in imessagedb[contacto]:
-         if tg_msg in imessagedb[contacto][dc_id]:
-            d_reply = imessagedb[contacto][dc_id][tg_msg]
-            return d_reply
+def find_register_msg(contacto, dc_id, tg_msg):
+   if contacto in messagedb:
+      if dc_id in messagedb[contacto]:
+         if tg_msg in messagedb[contacto][dc_id].values():
+            for (key, value) in messagedb[contacto][dc_id].items():
+                if value == tg_msg:
+                   d_reply = key
+                   return d_reply
          else:
             return
       else:
@@ -756,12 +748,9 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               #check if message is a reply
               if hasattr(m,'reply_to') and m.reply_to:
                  if hasattr(m.reply_to,'reply_to_msg_id') and m.reply_to.reply_to_msg_id:
-                    dc_mid = iis_register_msg(contacto, dc_id, m.reply_to.reply_to_msg_id)
-                    if dc_mid:
-                       all_dc_msg = chat_id.get_messages()
-                       for dcm in all_dc_msg:
-                           if dcm.id == dc_mid:
-                              quote = dcm
+                    dc_mid = find_register_msg(contacto, dc_id, m.reply_to.reply_to_msg_id)
+                    if dc_mid:               
+                       quote = bot.account.get_message_by_id(dc_mid)                 
                     else: 
                        mensaje = await client.get_messages(target, ids = [m.reply_to.reply_to_msg_id])
                        if mensaje and mensaje[0]:
