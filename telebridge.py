@@ -129,10 +129,13 @@ def deltabot_init(bot: DeltaBot) -> None:
 
 @simplebot.hookimpl
 def deltabot_start(bot: DeltaBot) -> None:
+    bridge_init = Event()
     Thread(
         target=start_background_loop,
+        args=(bridge_init,),
         daemon=True,
     ).start()
+    bridge_init.wait()
     global auto_load_task
     auto_load_task = asyncio.run_coroutine_threadsafe(auto_load(bot=bot, message = Message, replies = Replies),tloop)
     bot.get_chat(admin_addr).send_text('El bot '+bot.account.get_config('addr')+' se ha iniciado correctamente')
