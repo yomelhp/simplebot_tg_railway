@@ -17,6 +17,8 @@ else
       rm "$BOTZIPDB"
    else
       echo "No existen restauras, configurando..."
+      python3 -m simplebot --account "$ADDR" set_config configured_imap_certificate_checks False
+      python3 -m simplebot --account "$ADDR" set_config configured_smtp_certificate_checks False
       python3 -m simplebot --account "$ADDR" plugin --add ./telebridge.py
       python3 -m simplebot --account "$ADDR" admin --add "$ADMIN"
    fi
