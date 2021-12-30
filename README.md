@@ -1,2 +1,2 @@
-# simplebot_tg_railway
+# simplebot_tg_railwa
 Telegram/DeltaChat Bridge to deploy in railway.app
