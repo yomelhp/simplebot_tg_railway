@@ -52,7 +52,7 @@ black_list = None
 
 MAX_MSG_LOAD = 5
 MAX_MSG_LOAD_AUTO = 1
-MAX_AUTO_CHATS = 1
+MAX_AUTO_CHATS = 10
 MAX_SIZE_DOWN = 10485760
 MIN_SIZE_DOWN = 655360
 CAN_IMP = True
@@ -358,7 +358,7 @@ def deltabot_start(bot: DeltaBot) -> None:
        bot.get_chat(admin_addr).send_text('El bot '+bot_addr+' se ha iniciado correctamente')
 
 def hide_spoiler(s_text,offset,tlen):
-    h_text = '▚'*tlen
+    h_text = '?'*tlen
     mystring = h_text.join([s_text[:offset],s_text[offset+tlen:]])
     return mystring
 
@@ -472,9 +472,9 @@ async def chat_news(bot, payload, replies, message):
               if my_id == d.id:
                  titulo = 'Mensajes guardados'
               if str(d.id) in chatdb[message.get_sender_contact().addr]:
-                 comando = '\n❌ Desvilcular: /remove_'+str(d.id)
+                 comando = '\n? Desvilcular: /remove_'+str(d.id)
               else:
-                 comando = '\n✅ Cargar: /load_'+str(d.id)
+                 comando = '\n? Cargar: /load_'+str(d.id)
 
               if hasattr(d,'message') and d.message:
                  if hasattr(d.message,'from_id') and d.message.from_id:
@@ -540,12 +540,12 @@ async def chat_info(bot, payload, replies, message):
                          full = await client(GetFullUserRequest(mensaje[0].from_id))
                          tinfo += "Por usuario:"
                          if full.users[0].username:
-                            tinfo += "\n@👤: @"+str(full.users[0].username)
+                            tinfo += "\n@??: @"+str(full.users[0].username)
                          if full.users[0].first_name:
                             tinfo += "\nNombre: "+str(full.users[0].first_name)
                          if full.users[0].last_name:
                             tinfo += "\nApellidos: "+str(full.users[0].last_name)
-                         tinfo += "\n🆔️: "+str(mensaje[0].from_id.user_id)
+                         tinfo += "\n???: "+str(mensaje[0].from_id.user_id)
                          img = await client.download_profile_photo(mensaje[0].from_id.user_id)
                       elif isinstance(mensaje[0].from_id, types.PeerChannel):
                          full = await client(functions.channels.GetFullChannelRequest(channel = mensaje[0].from_id))
@@ -690,13 +690,13 @@ def list_chats(replies, message, payload):
        chatdb[message.get_sender_contact().addr] = {}
     chat_list = ''
     for (key, value) in chatdb[message.get_sender_contact().addr].items():
-        chat_list+='\n\n'+value+'\n❌ Desvincular: /remove_'+key
+        chat_list+='\n\n'+value+'\n? Desvincular: /remove_'+key
     replies.add(text = chat_list)
 
 async def add_auto_chats(bot, replies, message):
     """Enable auto load messages in the current chat. Example: /auto"""
     alloweddb ={'deltachat2':''}
-    alloweddb ={'NTCdcG':''}
+	 alloweddb ={'NTCdcG':''}
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para automatizar chats')
        return
@@ -740,7 +740,7 @@ async def add_auto_chats(bot, replies, message):
                 autochatsdb[message.get_sender_contact().addr][str(message.chat.id)]=target
                 for (key,_) in autochatsdb[message.get_sender_contact().addr].items():
                     del autochatsdb[message.get_sender_contact().addr][str(key)]
-                    replies.add(text='Solo se permiten automatizar hasta 5 chats, se ha automatizado este chat ('+str(len(autochatsdb[message.get_sender_contact().addr]))+' de '+str(MAX_AUTO_CHATS)+'), tiene '+str(sin_leer)+' mensajes sin leer y se ha desactivado la automatizacion del chat '+str(bot.get_chat(int(key)).get_name()))
+                    replies.add(text='Solo se permiten automatizar hasta 10 chats, se ha automatizado este chat ('+str(len(autochatsdb[message.get_sender_contact().addr]))+' de '+str(MAX_AUTO_CHATS)+'), tiene '+str(sin_leer)+' mensajes sin leer y se ha desactivado la automatizacion del chat '+str(bot.get_chat(int(key)).get_name()))
                     break
              else:
                 autochatsdb[message.get_sender_contact().addr][str(message.chat.id)]=target
@@ -909,7 +909,7 @@ async def login_code(payload, replies, message):
               me = await clientdb[message.get_sender_contact().addr].sign_in(phone=phonedb[message.get_sender_contact().addr], phone_code_hash=hashdb[message.get_sender_contact().addr], code=payload)
               logindb[message.get_sender_contact().addr]=clientdb[message.get_sender_contact().addr].session.save()
               savelogin()
-              replies.add(text = 'Se ha iniciado sesiòn correctamente, copie y pegue el mensaje del token en privado para iniciar rápidamente.\n⚠No debe compartir su token con nadie porque pueden usar su cuenta con este.\n\nAhora puede escribir /load para cargar sus chats.')
+              replies.add(text = 'Se ha iniciado sesiòn correctamente, copie y pegue el mensaje del token en privado para iniciar rápidamente.\n?No debe compartir su token con nadie porque pueden usar su cuenta con este.\n\nAhora puede escribir /load para cargar sus chats.')
               replies.add(text = '/token '+logindb[message.get_sender_contact().addr])
               await clientdb[message.get_sender_contact().addr].disconnect()
               del clientdb[message.get_sender_contact().addr]
@@ -938,7 +938,7 @@ async def login_2fa(payload, replies, message):
           me = await clientdb[message.get_sender_contact().addr].sign_in(phone=phonedb[message.get_sender_contact().addr], password=payload)
           logindb[message.get_sender_contact().addr]=clientdb[message.get_sender_contact().addr].session.save()
           savelogin()
-          replies.add(text = 'Se ha iniciado sesiòn correctamente, copie y pegue el mensaje del token en privado para iniciar rápidamente.\n⚠No debe compartir su token con nadie porque pueden usar su cuenta con este.\n\nAhora puede escribir /load para cargar sus chats.')
+          replies.add(text = 'Se ha iniciado sesiòn correctamente, copie y pegue el mensaje del token en privado para iniciar rápidamente.\n?No debe compartir su token con nadie porque pueden usar su cuenta con este.\n\nAhora puede escribir /load para cargar sus chats.')
           replies.add(text = '/token '+logindb[message.get_sender_contact().addr])
           await clientdb[message.get_sender_contact().addr].disconnect()
           del clientdb[message.get_sender_contact().addr]
@@ -1242,7 +1242,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                              reply_send_by = ""
                           if mensaje[0].poll:
                              if hasattr(mensaje[0].poll.poll, 'question') and mensaje[0].poll.poll.question:
-                                reply_text+='📊 '+mensaje[0].poll.poll.question
+                                reply_text+='?? '+mensaje[0].poll.poll.question
                           if hasattr(mensaje[0],'media') and mensaje[0].media:
                              if hasattr(mensaje[0].media,'photo'):
                                 reply_text += '[FOTO]'
@@ -1262,9 +1262,9 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
 
               #check if message is a system message
               if hasattr(m,'action') and m.action:
-                 mservice = '⚙\n'
+                 mservice = '?\n'
                  if isinstance(m.action, types.MessageActionPinMessage):
-                    mservice += '_📌Fijó el mensaje_\n'
+                    mservice += '_??Fijó el mensaje_\n'
                  elif isinstance(m.action, types.MessageActionChatAddUser):
                     mservice += '_Se unió al grupo_\n'
                  elif isinstance(m.action, types.MessageActionChatJoinedByLink):
@@ -1274,7 +1274,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  elif isinstance(m.action, types.MessageActionChannelCreate):
                     mservice += '_Se creo el grupo/canal_\n'
                  elif isinstance(m.action, types.MessageActionPhoneCall):
-                    mservice += '_📞Llamada_\n'
+                    mservice += '_??Llamada_\n'
 
               #extract sender name
               if hasattr(m,'sender') and m.sender and hasattr(m.sender,'first_name') and m.sender.first_name:
@@ -1306,30 +1306,30 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                          ncolumn += 1
                      html_buttons += '\n'
                      nrow += 1
-              down_button = "\n⬇ /down_"+str(m.id)+"\n⏩ /forward_"+str(m.id)+"_tg_file_link_bot\n⏩ /forward_"+str(m.id)+"_DirectLinkGeneratorbot\n⏩ /forward_"+str(m.id)+"_aiouploaderbot"
+              down_button = "\n? /down_"+str(m.id)+"\n? /forward_"+str(m.id)+"_tg_file_link_bot\n? /forward_"+str(m.id)+"_DirectLinkGeneratorbot\n? /forward_"+str(m.id)+"_aiouploaderbot"
 
               #check if message is a poll
               if m.poll:
                  if hasattr(m.poll.poll, 'question') and m.poll.poll.question:
-                    poll_message+='\n📊 '+m.poll.poll.question+'\n\n'
+                    poll_message+='\n?? '+m.poll.poll.question+'\n\n'
                     total_results = m.poll.results.total_voters
                     if m.poll.results.results and total_results>0:
                        n_results = 0
                        for res in m.poll.results.results:
                            if res.chosen:
                               if res.correct:
-                                 mark_text = "✅ "
+                                 mark_text = "? "
                               else:
-                                 mark_text = "☑ "
+                                 mark_text = "? "
                            else:
-                              mark_text = "🔳 "
+                              mark_text = "?? "
                            poll_message+='\n\n'+mark_text+str(round((res.voters/total_results)*100))+'% ('+str(res.voters)+') '+m.poll.poll.answers[n_results].text
                            n_results+=1
                     else:
                        if hasattr(m.poll.poll,'answers') and m.poll.poll.answers:
                           n_option = 0
                           for ans in m.poll.poll.answers:
-                              poll_message+='\n\n🔳 '+ans.text+' /c_'+str(m.id)+'_'+str(n_option)
+                              poll_message+='\n\n?? '+ans.text+' /c_'+str(m.id)+'_'+str(n_option)
                               n_option+=1
                     poll_message+='\n\n'+str(total_results)+' votos'
 
@@ -1458,13 +1458,13 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               await m.mark_read()
            else:
               if not load_history and not is_auto:
-                 myreplies.add(text = "Tienes "+str(sin_leer-limite)+" mensajes sin leer de "+str(ttitle)+"\n➕ /more", chat = chat_id)
+                 myreplies.add(text = "Tienes "+str(sin_leer-limite)+" mensajes sin leer de "+str(ttitle)+"\n? /more", chat = chat_id)
               break
        if sin_leer-limite<=0 and not load_history and not is_auto:
-          myreplies.add(text = "Estas al día con "+str(ttitle)+"\n➕ /more", chat = chat_id)
+          myreplies.add(text = "Estas al día con "+str(ttitle)+"\n? /more", chat = chat_id)
 
        if load_history:
-          myreplies.add(text = "Cargar más mensajes:\n➕ /more_-"+str(m_id), chat = chat_id)
+          myreplies.add(text = "Cargar más mensajes:\n? /more_-"+str(m_id), chat = chat_id)
        myreplies.send_reply_messages()
        await client.disconnect()
     except:
@@ -1983,12 +1983,12 @@ def stats(replies) -> None:
             fp = os.path.join(path, f)
             size += os.path.getsize(fp)
     replies.add(
-        text="**🖥️ Computer Stats:**\n"
+        text="**??? Computer Stats:**\n"
         f"CPU: {psutil.cpu_percent(interval=0.1)}%\n"
         f"Memory: {sizeof_fmt(mem.used)}/{sizeof_fmt(mem.total)}\n"
         f"Swap: {sizeof_fmt(swap.used)}/{sizeof_fmt(swap.total)}\n"
         f"Disk: {sizeof_fmt(disk.used)}/{sizeof_fmt(disk.total)}\n\n"
-        "**🤖 Bot Stats:**\n"
+        "**?? Bot Stats:**\n"
         f"CPU: {proc.cpu_percent(interval=0.1)}%\n"
         f"Memory: {sizeof_fmt(botmem.rss)}\n"
         f"Swap: {sizeof_fmt(botmem.swap if 'swap' in botmem._fields else 0)}\n"
