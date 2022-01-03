@@ -51,11 +51,11 @@ white_list = None
 black_list = None
 
 MAX_MSG_LOAD = 5
-MAX_MSG_LOAD_AUTO = 1
-MAX_AUTO_CHATS = 10
+MAX_MSG_LOAD_AUTO = 10
+MAX_AUTO_CHATS = 1
 MAX_SIZE_DOWN = 10485760
 MIN_SIZE_DOWN = 655360
-CAN_IMP = True
+CAN_IMP = False
 
 #use env to add to the lists like "user1@domine.com user2@domine.com" with out ""
 if os.getenv('WHITE_LIST'):
@@ -696,7 +696,7 @@ def list_chats(replies, message, payload):
 async def add_auto_chats(bot, replies, message):
     """Enable auto load messages in the current chat. Example: /auto"""
     alloweddb ={'deltachat2':''}
-	 alloweddb ={'NTCdcG':''}
+	
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para automatizar chats')
        return
@@ -740,7 +740,7 @@ async def add_auto_chats(bot, replies, message):
                 autochatsdb[message.get_sender_contact().addr][str(message.chat.id)]=target
                 for (key,_) in autochatsdb[message.get_sender_contact().addr].items():
                     del autochatsdb[message.get_sender_contact().addr][str(key)]
-                    replies.add(text='Solo se permiten automatizar hasta 10 chats, se ha automatizado este chat ('+str(len(autochatsdb[message.get_sender_contact().addr]))+' de '+str(MAX_AUTO_CHATS)+'), tiene '+str(sin_leer)+' mensajes sin leer y se ha desactivado la automatizacion del chat '+str(bot.get_chat(int(key)).get_name()))
+                    replies.add(text='Solo se permiten automatizar hasta 5 chats, se ha automatizado este chat ('+str(len(autochatsdb[message.get_sender_contact().addr]))+' de '+str(MAX_AUTO_CHATS)+'), tiene '+str(sin_leer)+' mensajes sin leer y se ha desactivado la automatizacion del chat '+str(bot.get_chat(int(key)).get_name()))
                     break
              else:
                 autochatsdb[message.get_sender_contact().addr][str(message.chat.id)]=target
