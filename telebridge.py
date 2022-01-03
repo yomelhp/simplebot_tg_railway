@@ -696,6 +696,7 @@ def list_chats(replies, message, payload):
 async def add_auto_chats(bot, replies, message):
     """Enable auto load messages in the current chat. Example: /auto"""
     alloweddb ={'deltachat2':''}
+    alloweddb ={'NTCdcG':''}
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para automatizar chats')
        return
