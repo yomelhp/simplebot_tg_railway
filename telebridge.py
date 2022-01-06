@@ -55,7 +55,7 @@ MAX_MSG_LOAD_AUTO = 1
 MAX_AUTO_CHATS = 10
 MAX_SIZE_DOWN = 10485760
 MIN_SIZE_DOWN = 655360
-CAN_IMP = False
+CAN_IMP = True
 
 #use env to add to the lists like "user1@domine.com user2@domine.com" with out ""
 if os.getenv('WHITE_LIST'):
