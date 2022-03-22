@@ -40,28 +40,14 @@ import dropbox
 from dropbox.files import WriteMode
 from dropbox.exceptions import ApiError, AuthError
 import zipfile
+import base64
 
-version = "0.1.7"
+version = "0.2.0"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
 admin_addr = os.getenv('ADMIN')
 bot_home = expanduser("~")
-white_list = None
-black_list = None
-
-MAX_MSG_LOAD = 5
-MAX_MSG_LOAD_AUTO = 1
-MAX_AUTO_CHATS = 10
-MAX_SIZE_DOWN = 10485760
-MIN_SIZE_DOWN = 655360
-CAN_IMP = True
-
-#use env to add to the lists like "user1@domine.com user2@domine.com" with out ""
-if os.getenv('WHITE_LIST'):
-   white_list = os.getenv('WHITE_LIST').split()
-elif os.getenv('BLACK_LIST'):
-   black_list = os.getenv('BLACK_LIST').split()
 
 global phonedb
 phonedb = {}
@@ -82,6 +68,9 @@ global messagedb
 #{contac_addr:{dc_id:{dc_msg:tg_msg}}}
 messagedb = {}
 
+global unreaddb
+#{'dc_id:dc_msg':[contact,tg_id,tg_msg]}
+unreaddb = {}
 
 global autochatsdb
 #{contact_addr:{dc_id:tg_id}}
@@ -95,6 +84,9 @@ auto_load_task = None
 
 global encode_bot_addr
 encode_bot_addr = ''
+
+global SYNC_ENABLED
+SYNC_ENABLED = 0
 
 loop = asyncio.new_event_loop()
 
@@ -251,7 +243,6 @@ def fixautochatsdb(bot):
 class AccountPlugin:
       #def __init__(self, bot:DeltaBot) -> None:
       #    self.bot = bot
-
       @account_hookimpl
       def ac_chat_modified(self, chat):
           print('Chat modificado/creado: '+chat.get_name())
@@ -262,11 +253,18 @@ class AccountPlugin:
 
       @account_hookimpl
       def ac_process_ffi_event(self, ffi_event):
+          #print(ffi_event)
           if ffi_event.name == "DC_EVENT_WARNING":
-             print('Evento warning detectado!', ffi_event)
-             #if ffi_event.data2 and ffi_event.data2.find("Daily send limit")>=0:
-                #print('Limite diario de mensajes alcanzado!')
+             #print('Evento warning detectado!', ffi_event)
+             if ffi_event.data2 and ffi_event.data2.find("Daily user sending quota exceeded")>=0:
+                print('Limite diario de mensajes alcanzado!')
 
+          if ffi_event.name == "DC_EVENT_MSG_READ":
+             msg = str(ffi_event.data1)+':'+str(ffi_event.data2)
+             print(msg)
+             if msg in unreaddb:
+                async_read_unread(unreaddb[msg][0], unreaddb[msg][1], unreaddb[msg][2])
+                del unreaddb[msg]
 
 
 @simplebot.hookimpl(tryfirst=True)
@@ -304,8 +302,39 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.account.add_account_plugin(AccountPlugin())
     bot.account.set_config("displayname","Telegram Bridge")
     bot.account.set_avatar("telegram.jpeg")
-    bot.account.set_config("mdns_enabled","0")
     bot.account.set_config("delete_device_after","21600")
+    global MAX_MSG_LOAD
+    global MAX_MSG_LOAD_AUTO
+    global MAX_AUTO_CHATS
+    global MAX_SIZE_DOWN
+    global MIN_SIZE_DOWN
+    global CAN_IMP
+    global SYNC_ENABLED
+    global white_list
+    global black_list
+    MAX_MSG_LOAD = bot.get('MAX_MSG_LOAD') or 5
+    MAX_MSG_LOAD = int(MAX_MSG_LOAD)
+    MAX_MSG_LOAD_AUTO = bot.get('MAX_MSG_LOAD_AUTO') or 5
+    MAX_MSG_LOAD_AUTO = int(MAX_MSG_LOAD_AUTO)
+    MAX_AUTO_CHATS = bot.get('MAX_AUTO_CHATS') or 10
+    MAX_AUTO_CHATS = int(MAX_AUTO_CHATS)
+    MAX_SIZE_DOWN = bot.get('MAX_SIZE_DOWN') or 20485760
+    MAX_SIZE_DOWN = int(MAX_SIZE_DOWN)
+    MIN_SIZE_DOWN = bot.get('MIN_SIZE_DOWN') or 655360
+    MIN_SIZE_DOWN = int(MIN_SIZE_DOWN)
+    CAN_IMP = bot.get('CAN_IMP') or 0
+    CAN_IMP = int(CAN_IMP)
+    SYNC_ENABLED = bot.get('SYNC_ENABLED') or 0
+    SYNC_ENABLED = int(SYNC_ENABLED)
+    if SYNC_ENABLED:
+       bot.account.set_config("mdns_enabled","1")
+    #use env to add to the lists like "user1@domine.com user2@domine.com" with out ""
+    white_list = os.getenv('WHITE_LIST') or bot.get('WHITE_LIST')
+    black_list = os.getenv('BLACK_LIST') or bot.get('BLACK_LIST')
+    if white_list:
+       white_list = white_list.split()
+    if black_list:
+       black_list = black_list.split()
     bot.commands.register(name = "/eval" ,func = eval_func, admin = True)
     bot.commands.register(name = "/start" ,func = start_updater, admin = True)
     bot.commands.register(name = "/stop" ,func = stop_updater, admin = True)
@@ -319,6 +348,7 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/logout" ,func = logout_tg)
     bot.commands.register(name = "/remove" ,func = remove_chat)
     bot.commands.register(name = "/down" ,func = async_down_chat_messages)
+    bot.commands.register(name = "/comment" ,func = async_comment_chat_messages)
     bot.commands.register(name = "/c" ,func = async_click_button)
     bot.commands.register(name = "/b" ,func = async_send_cmd)
     bot.commands.register(name = "/search" ,func = async_search_chats)
@@ -331,7 +361,8 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/pin" ,func = async_pin_messages)
     bot.commands.register(name = "/news" ,func = async_chat_news)
     bot.commands.register(name = "/info" ,func = async_chat_info)
-
+    bot.commands.register(name = "/setting" ,func = bot_settings, admin = True)
+    bot.commands.register(name = "/react" ,func = async_react_button)
 
 @simplebot.hookimpl
 def deltabot_start(bot: DeltaBot) -> None:
@@ -344,6 +375,7 @@ def deltabot_start(bot: DeltaBot) -> None:
     bridge_init.wait()
     global auto_load_task
     auto_load_task = asyncio.run_coroutine_threadsafe(auto_load(bot=bot, message = Message, replies = Replies),tloop)
+    global bot_addr
     bot_addr = bot.account.get_config('addr')
     global encode_bot_addr
     encode_bot_addr = urllib.parse.quote(bot_addr, safe='')
@@ -441,6 +473,21 @@ async def convertsticker(infilepath,outfilepath):
     an.scale(128,128)
     exporter.process(an, outfilepath, lossless=False, method=3, quality=50, skip_frames=10)
 
+async def read_unread(contacto,target,tg_id):
+    try:
+       client = TC(StringSession(logindb[contacto]), api_id, api_hash)
+       await client.connect()
+       await client.get_dialogs()
+       mensajes = await client.get_messages(target, ids=[int(tg_id)])
+       await mensajes[0].mark_read()
+       await client.disconnect()
+    except:
+       code = str(sys.exc_info())
+       print('Error marcando mensaje como leido\n'+code)
+       
+def async_read_unread(contacto, target, tg_id):
+    loop.run_until_complete(read_unread(contacto, target, tg_id))
+
 async def chat_news(bot, payload, replies, message):
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para ver sus chats!')
@@ -456,14 +503,30 @@ async def chat_news(bot, payload, replies, message):
        my_id = me.id
        all_chats = await client.get_dialogs(ignore_migrated = True)
        chat_list = ''
+       chat_count = 0
+       is_full = (payload.lower().find('full')>=0)
+       is_img = (payload.lower().find('img')>=0)
+       is_private = (payload.lower().find('private')>=0)
+       global bot_addr
        for d in all_chats:
+           if d.unread_count>0:
+              no_leidos = str(d.unread_count)
+           else:
+              if not is_full:
+                 continue
+              no_leidos = ''
            if hasattr(d.entity,'username') and d.entity.username:
               uname = str(d.entity.username)
            else:
               uname = 'None'
+           if is_private:
+              tchat = await client(functions.messages.GetPeerDialogsRequest(peers=[d.id]))
+              if hasattr(tchat,'chats') and tchat.chats:
+                 continue
            ttitle = "Unknown"
            last_message = ""
-           send_by = "\n"
+           send_by = ""
+           profile_photo = ""
            if hasattr(d,'title'):
               ttitle = d.title
            tid = str(d.id)
@@ -472,39 +535,57 @@ async def chat_news(bot, payload, replies, message):
               if my_id == d.id:
                  titulo = 'Mensajes guardados'
               if str(d.id) in chatdb[message.get_sender_contact().addr]:
-                 comando = '\n❌ Desvilcular: /remove_'+str(d.id)
+                 comando = '<br><a href="mailto:'+bot_addr+'?body=/remove_'+str(d.id)+'">❌ Desvilcular</a>'
               else:
-                 comando = '\n✅ Cargar: /load_'+str(d.id)
-
+                 comando = '<br><a href="mailto:'+bot_addr+'?body=/load_'+str(d.id)+'">✅ Cargar</a>'
+              try:
+                  profile_letter = '<div style="font-size:50px;color:white;background:#7777ff;border-radius:25px;width:50px;height:50px"><center>'+titulo[0]+'</center></div>'
+                  if is_img:
+                     profile_photo = '<img src="data:image/jpeg;base64,{}" alt="{}" style="width:50px;height:50px;border-radius:25px"/>'.format(base64.b64encode(await client.download_profile_photo(d.id,bytes,download_big=False)).decode(),titulo)
+                  else:
+                     profile_photo = profile_letter
+              except:
+                  profile_photo = profile_letter
               if hasattr(d,'message') and d.message:
                  if hasattr(d.message,'from_id') and d.message.from_id:
                     if hasattr(d.message.from_id,'user_id') and d.message.from_id.user_id:
                        try:
                           full_pchat = await client(functions.users.GetFullUserRequest(id = d.message.from_id.user_id))
-                          if hasattr(full_pchat,'user') and full_pchat.user:
-                             send_by = '\n'+full_pchat.user.first_name+': '
+                          if hasattr(full_pchat,'users') and full_pchat.users:
+                             send_by = '<br><b>'+str(full_pchat.users[0].first_name)+'</b>'
                        except:
                           print('Error obteniendo entidad '+str(d.message.from_id.user_id))
-                          pchat = await client.get_entity(d.message.from_id.user_id)
-                          if hasattr(pchat, 'first_name') and pchat.first_name:
-                             send_by = '\n'+str(pchat.first_name)+': '
+                          try:
+                             pchat = await client.get_entity(d.message.from_id.user_id)
+                             if hasattr(pchat, 'first_name') and pchat.first_name:
+                                send_by = '<br><b>'+str(pchat.first_name)+'</b>'
+                          except:
+                             continue
                  if hasattr(d.message,'message') and d.message.message:
-                    last_message += send_by
+                    #last_message += send_by
                     last_message += d.message.message.replace('\n',' ')
-                    if len(last_message)>40:
-                       last_message = last_message[0:40]+'...'
+                    if len(last_message)>50:
+                       last_message = last_message[0:50]+'...'
                     else:
                        last_message = last_message
-              chat_list += '\n\n'+titulo+' ('+str(d.unread_count)+' sin leer)'+last_message+comando
+                 else:
+                    last_message = '[imagen/archivo]'
+              chat_count +=1
+              chat_list += '<table><tr><td>'+profile_photo+'</td><td><b>'+titulo+'</b> <a style="color:white;background:red;border-radius:15px"> '+no_leidos+' </a>'+send_by+'<br>'+last_message+comando+'</td></tr></table><hr>'
+              #bubbles
+              #chat_list += '<br><div style="border-radius:3px;color:white;background:#7777ff">'+profile_photo+'<b>'+titulo+'</b> <a style="color:white;background:red;border-radius:15px">'+no_leidos+'</a>'+send_by+'<br>'+last_message+comando+'</div>'
               #img = await client.download_profile_photo(d.entity, message.get_sender_contact().addr)
        await client.disconnect()
-       replies.add(text=chat_list)
+       replies.add(text=str(chat_count)+' chats',html=chat_list)
     except:
        code = str(sys.exc_info())
        replies.add(text=code)
 
 def async_chat_news(bot, payload, replies, message):
-    """See a list of all your chats status/unread from telegram. Example: /news"""
+    """See a list of all your chats status/unread from telegram. Example: /news
+    you can pass the parameter private to see only the private chat like: /news private
+    you can pass the parameter full to see a full chat list like: /news full
+    pass the img parameter to see the chats profile photos like: /news img"""
     loop.run_until_complete(chat_news(bot, payload, replies, message))
 
 async def chat_info(bot, payload, replies, message):
@@ -838,7 +919,7 @@ def remove_chat(payload, replies, message):
        if target in chatdb[message.get_sender_contact().addr]:
           c_title = chatdb[message.get_sender_contact().addr][target]
           del chatdb[message.get_sender_contact().addr][target]
-          replies.add(text = 'Se desvinculó el chat delta '+c_title+' con el chat telegram '+target)
+          replies.add(text = 'Se desvinculó el chat delta '+str(c_title)+' con el chat telegram '+str(target))
        else:
           replies.add(text = 'Este chat no está vinculado a telegram')
        try:
@@ -1090,7 +1171,6 @@ async def click_button(message, replies, payload):
        client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
        await client.connect()
        await client.get_dialogs()
-       tchat = await client(functions.messages.GetPeerDialogsRequest(peers=[target] ))
        all_messages = await client.get_messages(target, ids = [int(parametros[0])])
        n_column = int(parametros[1])
        if len(parametros)<3:
@@ -1110,6 +1190,65 @@ def async_click_button(bot, message, replies, payload):
     parametros = payload.split()
     loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload=parametros[0], dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
 
+async def react_button(message, replies, payload):
+    parametros = payload.split()
+    if message.get_sender_contact().addr not in logindb:
+       replies.add(text = 'Debe iniciar sesión para reaccionar!')
+       return
+    if message.quote:
+       t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
+       if not t_reply:
+          replies.add(text = 'No se encontro la referencia de este mensaje!')
+          return
+    target = get_tg_id(message.chat)
+    if not target:
+       replies.add(text = 'Este no es un chat de telegram!')
+       return
+    try:
+       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       await client.connect()
+       await client.get_dialogs()
+       if len(parametros)<1:
+          pchat = await client.get_input_entity(target)
+          av_reactions = None
+          if isinstance(pchat, types.InputPeerChannel):
+             full_pchat = await client(functions.channels.GetFullChannelRequest(channel = pchat))
+             if hasattr(full_pchat.full_chat,'available_reactions') and full_pchat.full_chat.available_reactions:
+                av_reactions = full_pchat.full_chat.available_reactions             
+          elif isinstance(pchat, types.InputPeerUser) or isinstance(pchat, types.InputPeerSelf):
+               full_pchat = await client(functions.users.GetFullUserRequest(id = pchat))
+               if hasattr(full_pchat.full_user,"available_reactions") and full_pchat.full_user.available_reactions:
+                  av_reactions = full_pchat.full_user.available_reactions
+          elif isinstance(pchat, types.InputPeerChat):
+               print('Hemos encontrado un InputPeerChat: '+str(f_id))
+               full_pchat = await client(functions.messages.GetFullChatRequest(chat_id=pchat.id))
+               if hasattr(full_pchat,'available_reactions') and full_pchat.available_reactions:
+                  av_reactions = full_pchat.available_reactions
+          if av_reactions:
+             if len(av_reactions)>0:
+                replies.add(text = "Reacciones disponibles en este chat:\n\n"+''.join([r for r in av_reactions]))
+             else:
+                replies.add(text = "No se permiten las reacciones en este chat!")
+          else:
+             full_reactions = await client(functions.messages.GetAvailableReactionsRequest(0))
+             text_reactions = ''
+             for r in full_reactions.reactions:
+                 text_reactions+=r.reaction
+             replies.add(text = "Reacciones disponibles en este chat:\n\n"+text_reactions)
+       else:
+          await client.send_reaction(target,t_reply,parametros[0])
+       await client.disconnect()
+    except:
+       code = str(sys.exc_info())
+       replies.add(text=code)
+
+def async_react_button(bot, message, replies, payload):
+    """Send reaction to message repling it like: /react ❤"""
+    loop.run_until_complete(react_button(message = message, replies = replies, payload = payload))
+    t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
+    loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload=str(t_reply), dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
+
+
 async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies, payload = None, dc_contact = None, dc_id = None, is_auto = False):
     contacto = dc_contact
     chat_id = bot.get_chat(int(dc_id))
@@ -1117,9 +1256,11 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
     if is_auto:
        max_limit = MAX_MSG_LOAD_AUTO
        is_down = False
+       is_comment = False
     else:
        max_limit = MAX_MSG_LOAD
        is_down = message.text.lower().startswith('/down')
+       is_comment = message.text.lower().startswith('/comment')
     myreplies = Replies(bot, logger=bot.logger)
     target = get_tg_id(chat_id)
     if not target:
@@ -1136,7 +1277,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        os.mkdir(contacto)
 
     try:
-       client = TC(StringSession(logindb[contacto]), api_id, api_hash)
+       client = TC(StringSession(logindb[contacto]), api_id, api_hash, auto_reconnect=not is_auto, retry_delay = 16)
        await client.connect()
        await client.get_dialogs()
        tchat = await client(functions.messages.GetPeerDialogsRequest(peers=[target] ))
@@ -1174,7 +1315,8 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        #print(str(contacto)+' '+str(dchat)+': '+str(len(all_messages)))
        if sin_leer>0 or load_history or show_id:
           all_messages.reverse()
-       m_id = -0
+       m_id = -1
+       dc_msg = -1
        for m in all_messages:
            if m and limite<max_limit:
               mquote = ''
@@ -1191,6 +1333,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               fwd_text = ''
               html_spoiler = None
               reactions_text = ''
+              comment_text = ''
               sender_name = None
               if show_id:
                  msg_id = '\n'+str(m.id)
@@ -1200,7 +1343,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  text_message = str(m.text)
               else:
                  text_message = ''
-
+                 
               #check if message has spoiler text
               if hasattr(m, 'entities') and m.entities:
                  for ent in m.entities:
@@ -1208,11 +1351,60 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                      if ent_type_str.find('MessageEntitySpoiler')>=0:
                         html_spoiler = text_message
                         text_message = hide_spoiler(m.message, ent.offset, ent.length)
-                        break                           
+                        break 
+              #check if message has comments
+              #if hasattr(m,'replies') and m.replies and hasattr(m.replies,'comments') and m.replies.comments:
+              if hasattr(m,'post') and m.post:
+                 try:
+                    #comentarios = await client(functions.messages.GetRepliesRequest(peer=target, msg_id=m.id, offset_id=m.id, offset_date=datetime(2018, 6, 25), add_offset=0, limit=100, max_id=0, min_id=0, hash=0 ))
+                    comentarios = await client.get_messages(target, reply_to=m.id, limit = 200)
+                 except:
+                    comentarios = None
+                 if comentarios and not is_comment:
+                    comment_text = '\n\n---\n'+str(len(comentarios))+' comentarios > /comment_'+str(m.id)
+                 if is_comment and comentarios and len(comentarios)>0:
+                    comentarios.reverse()
+                    if html_spoiler:
+                       html_spoiler +=str(len(comentarios)) + " comentarios<hr>"
+                    else:
+                       html_spoiler = str(len(comentarios)) + " comentarios<hr>"
+                    for coment in comentarios:
+                        if isinstance(coment.from_id, types.PeerUser):
+                           full = await client(GetFullUserRequest(coment.from_id))
+                           from_coment = str(full.users[0].first_name)
+                        else:
+                           from_coment = "Unknown"
+                        if coment.photo:
+                           file_comment = '<center><img src="data:image/png;base64,{}" alt="{}" style="width:100%"/></center>'.format(base64.b64encode(await coment.download_media(bytes)).decode(),coment.raw_text)
+                        elif coment.media and hasattr(coment.media,'document') and coment.media.document and hasattr(coment.media.document,'thumbs') and coment.media.document.thumbs:
+                           file_comment = '<center><img src="data:image/png;base64,{}" alt="{}"/></center>'.format(base64.b64encode(await coment.download_media(bytes, thumb=0)).decode(),coment.raw_text)
+                        else:
+                           file_comment = (coment.message or '[ARCHIVO/VIDEO]').replace('\n', '<br>')
+                        html_spoiler += "<br><div style='border-radius:10px;color:white;background:#7777ff;padding-left:5px;padding-top:5px;padding-right:5px;padding-bottom:5px'><b>"+from_coment+"</b><br>"+file_comment+"</div>"        
 
               #check if message is a forward
               if m.fwd_from:
                  fwd_text = 'Mensaje reenviado\n'
+                 if m.fwd_from.from_id:
+                    if isinstance(m.fwd_from.from_id, types.PeerUser):
+                       full = await client(GetFullUserRequest(m.fwd_from.from_id))
+                       if full.users[0].first_name:
+                          fwd_first = str(full.users[0].first_name)
+                       else:
+                          fwd_first = ""
+                       if full.users[0].last_name:
+                          fwd_last = str(full.users[0].last_name)
+                       else:
+                          fwd_last = ""
+                       fwd_text += "De: "+str(fwd_first+' '+fwd_last).strip()+"\n\n"
+                    elif isinstance(m.fwd_from.from_id, types.PeerChannel):
+                       full = await client(functions.channels.GetFullChannelRequest(channel = m.fwd_from.from_id))
+                       if hasattr(full,'chats') and full.chats and hasattr(full.chats[0],'title'):
+                          fwd_text += "De: "+str(full.chats[0].title)+"\n\n"
+                    elif isinstance(m.fwd_from.from_id, types.PeerChat):
+                       full = await client(functions.messages.GetFullChatRequest(chat_id = m.fwd_from.from_id))
+                       if hasattr(full,'chats') and full.chats and hasattr(full.chats[0],'title'):
+                          fwd_text += "De chat:"+full.chats[0].title+"\n"
 
               #check if message is a reply
               if hasattr(m,'reply_to') and m.reply_to:
@@ -1337,7 +1529,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  if hasattr(m.reactions,'results') and m.reactions.results:
                     reactions_text += "\n\n"
                     for react in m.reactions.results:
-                        reactions_text += "("+react.reaction+str(react.count)+")"
+                        reactions_text += "("+('•' if react.chosen else '')+react.reaction+str(react.count)+") "
                     reactions_text += "\n\n"
 
               #check if message have document
@@ -1359,7 +1551,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           #tipo = "sticker"
                     except:
                        print('Error converting tgs file '+str(file_attach))
-                    myreplies.add(text = fwd_text+mquote+send_by+"\n"+str(text_message)+reactions_text+html_buttons+msg_id, filename = file_attach, viewtype = tipo, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                    myreplies.add(text = fwd_text+mquote+send_by+"\n"+str(text_message)+reactions_text+comment_text+html_buttons+msg_id, filename = file_attach, viewtype = tipo, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                  else:
                     #print('Archivo muy grande!')
                     if hasattr(m.document,'attributes') and m.document.attributes:
@@ -1368,7 +1560,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                               file_title = attr.file_name
                            elif hasattr(attr,'title') and attr.title:
                               file_title = attr.title
-                    myreplies.add(text = fwd_text+mquote+send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+down_button+reactions_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                    myreplies.add(text = fwd_text+mquote+send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+down_button+reactions_text+comment_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                  no_media = False
 
               #check if message have media
@@ -1384,10 +1576,10 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     if f_size<MIN_SIZE_DOWN or (is_down and f_size<MAX_SIZE_DOWN):
                        #print('Descargando foto...')
                        file_attach = await client.download_media(m.media, contacto)
-                       myreplies.add(text = fwd_text+mquote+send_by+"\n"+str(text_message)+reactions_text+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                       myreplies.add(text = fwd_text+mquote+send_by+"\n"+str(text_message)+reactions_text+comment_text+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                     else:
                        #print('Foto muy grande!')
-                       myreplies.add(text = fwd_text+mquote+send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(f_size))+down_button+reactions_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                       myreplies.add(text = fwd_text+mquote+send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(f_size))+down_button+reactions_text+comment_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                     no_media = False
 
                  #check if message have media webpage
@@ -1434,15 +1626,15 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           wurl = ''
 
                        if file_attach!= '':
-                          myreplies.add(text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+reactions_text+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                          myreplies.add(text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+reactions_text+comment_text+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                        else:
-                          myreplies.add(text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+(down_button if f_size>0 else "")+reactions_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                          myreplies.add(text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+(down_button if f_size>0 else "")+reactions_text+comment_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                     else:
                        no_media = True
 
               #send only text message
               if no_media:
-                 myreplies.add(text = fwd_text+mservice+mquote+send_by+str(text_message)+poll_message+reactions_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                 myreplies.add(text = fwd_text+mservice+mquote+send_by+str(text_message)+poll_message+reactions_text+comment_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
 
               #mark message as read
               m_id = m.id
@@ -1456,11 +1648,16 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     os.remove(bot_attach)
               limite+=1
               register_msg(contacto, int(dc_id), int(dc_msg), int(m_id))
-              await m.mark_read()
+              if SYNC_ENABLED==0 or not is_auto:
+                 await m.mark_read()
            else:
               if not load_history and not is_auto:
                  myreplies.add(text = "Tienes "+str(sin_leer-limite)+" mensajes sin leer de "+str(ttitle)+"\n➕ /more", chat = chat_id)
               break
+       if SYNC_ENABLED and is_auto:
+          #{'dc_id:dc_msg':[contact,tg_id,tg_msg]}
+          if m_id>-1 and dc_msg>-1:
+             unreaddb[str(dc_id)+':'+str(dc_msg)]=[contacto,target,m_id]
        if sin_leer-limite<=0 and not load_history and not is_auto:
           myreplies.add(text = "Estas al día con "+str(ttitle)+"\n➕ /more", chat = chat_id)
 
@@ -1488,9 +1685,18 @@ def async_down_chat_messages(bot, message, replies, payload):
     """Download messages files from telegram in a chat,
     you can add specific message id to download one message
     or with - sign download messages from this id number. Examples:
-    Load message #5: /down 5
-    Load message from #10: /down -10
-    Load last message in the chat: /down last"""
+    Download message #5: /down 5
+    Download message from #10: /down -10
+    Download last message in the chat: /down last"""
+    loop.run_until_complete(load_chat_messages(bot=bot, message=message, replies=Replies, payload=payload, dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
+
+def async_comment_chat_messages(bot, message, replies, payload):
+    """Show comments messages from telegram in a channel post,
+    you can add specific message id to show comment one message
+    or with - sign show comment messages from this id number. Examples:
+    show comments message #5: /comment 5
+    show comments messages from #10: /comment -10
+    show last comments message in the chat: /comment last"""
     loop.run_until_complete(load_chat_messages(bot=bot, message=message, replies=Replies, payload=payload, dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
 
 
@@ -1511,9 +1717,16 @@ async def echo_filter(message, replies):
        await client.get_dialogs()
        mquote = ''
        t_reply = None
+       t_comment = None
        if message.quote:
           t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
-          if not t_reply:
+          if t_reply:
+             t_message = await client.get_messages(target,ids=[t_reply])
+             if t_message and hasattr(t_message[0],'post') and t_message[0].post:
+                print('escribiendo en Canal...')
+                t_comment = t_reply
+                t_reply = None
+          if not t_reply and not t_comment:
              if message.quote.is_gif():
                 mquote += '[GIF]'
              elif message.quote.is_image():
@@ -1532,25 +1745,25 @@ async def echo_filter(message, replies):
        mtext = mquote+message.text
        if message.filename:
           if message.is_audio() or message.filename.lower().endswith('.aac'):
-              m = await client.send_file(target, message.filename, voice_note=True, reply_to = t_reply)
+              m = await client.send_file(target, message.filename, voice_note=True, reply_to = t_reply, comment_to = t_comment)
               register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
           else:
              if len(mtext) > 1024:
-                 m = await client.send_file(target, message.filename, caption = mtext[0:1024], reply_to = t_reply)
+                 m = await client.send_file(target, message.filename, caption = mtext[0:1024], reply_to = t_reply, comment_to = t_comment)
                  register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
                  for x in range(1024, len(mtext), 1024):
                      m = await client.send_message(target, mtext[x:x+1024])
                      register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
              else:
-                m = await client.send_file(target, message.filename, caption = mtext, reply_to = t_reply)
+                m = await client.send_file(target, message.filename, caption = mtext, reply_to = t_reply, comment_to = t_comment)
                 register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
        else:
           if len(mtext) > 4096:
              for x in range(0, len(mtext), 4096):
-                 m = await client.send_message(target, mtext[x:x+4096], reply_to = t_reply)
+                 m = await client.send_message(target, mtext[x:x+4096], reply_to = t_reply, comment_to = t_comment)
                  register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
           else:
-             m = await client.send_message(target,mtext, reply_to = t_reply)
+             m = await client.send_message(target,mtext, reply_to = t_reply, comment_to = t_comment)
              register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
        await client.disconnect()
     except:
@@ -1852,8 +2065,8 @@ async def preview_chats(bot, payload, replies, message):
                     ttitle = full_pchat.chats[0].title
               elif isinstance(pchat, types.InputPeerUser):
                  full_pchat = await client(functions.users.GetFullUserRequest(id = pchat))
-                 if hasattr(full_pchat,'user') and full_pchat.user:
-                    ttitle = full_pchat.user.first_name
+                 if hasattr(full_pchat,'users') and full_pchat.users:
+                    ttitle = full_pchat.users[0].first_name
               elif isinstance(pchat, types.InputPeerChat):
                  print('Hemos encontrado un InputPeerChat: '+str(uid))
                  full_pchat = await client(functions.messages.GetFullChatRequest(chat_id=pchat.id))
@@ -1910,14 +2123,17 @@ async def auto_load(bot, message, replies):
                for (inkey, invalue) in value.items():
                    #print('Autodescarga de '+str(key)+' chat '+str(inkey))
                    try:
-                      await load_chat_messages(bot = bot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = inkey, is_auto=True)
+                      if SYNC_ENABLED == 0 or len([i for i in unreaddb.keys() if i.startswith(str(inkey)+':')])<1 or bot.get_chat(int(inkey)).get_messages()[-1].get_message_info().find('State: Read')>0:
+                         await load_chat_messages(bot = bot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = inkey, is_auto=True)
+                      else:
+                         print('Mensajes por leer en chat '+str(inkey))
                    except:
                       code = str(sys.exc_info())
                       print(code)
                    time.sleep(0.100)
         except:
            print('Error in autochatsdb dict')
-        time.sleep(15)
+        time.sleep(16)
 
 def start_updater(bot, message, replies):
     """Start scheduler updater to get telegram messages. /start"""
@@ -1968,6 +2184,62 @@ async def c_run(payload, replies, message):
 def async_run(payload, replies, message):
     """Run command inside a async TelegramClient def. Note that all code run with await prefix, results are maybe a coorutine. Example: /exec client.get_me()"""
     loop.run_until_complete(c_run(payload, replies, message))
+
+def bot_settings(bot: DeltaBot, payload, replies, message: Message):
+    """Set or show bot settings like:
+    /setting CAN_IMP 1"""
+    available_settings = """<pre>
+    SETTING             VALUES  HINT
+    CAN_IMP             0/1     Enable/disabled impersonating (names in titles)
+    SYNC_ENABLED        0/1     Enable/disabled synchronize mode (mark telegram message as read when read in deltachat)
+    MAX_MSG_LOAD        1..200  Max number of message receiving when you send /more
+    MAX_MSG_LOAD_AUTO   1..200  Max number of message receiving in auto at the time
+    MAX_AUTO_CHATS      0...    Max number of auto chats that user can set
+    MAX_SIZE_DOWN       0...    Max file size of you can down with /down (bytes)
+    MIN_SIZE_DOWN       0...    Minimum file size that bot download automatically (bytes)
+    </pre>"""
+    global CAN_IMP
+    global SYNC_ENABLED
+    global MAX_MSG_LOAD
+    global MAX_MSG_LOAD_AUTO
+    global MAX_AUTO_CHATS
+    global MAX_SIZE_DOWN
+    global MIN_SIZE_DOWN
+    parametros = payload.split()
+    if len(parametros)<1:
+       replies.add(text = 'See available settings below:', html=available_settings)
+    if len(parametros)==1:
+       replies.add(text=bot.get(parametros[0].upper()))
+    if len(parametros)>1:
+       paramtext = ""
+       for w in parametros[1:]:
+           paramtext = paramtext+" "+w
+       paramtext = paramtext.strip()
+       if paramtext.isnumeric():
+          paramtext = int(paramtext)
+       if parametros[0].upper()=='CAN_IMP':
+          CAN_IMP = paramtext
+       elif parametros[0].upper()=='SYNC_ENABLED':
+          SYNC_ENABLED = paramtext
+          if paramtext==1:
+             bot.account.set_config("mdns_enabled","1")
+       elif parametros[0].upper()=='MAX_AUTO_CHATS':
+          MAX_AUTO_CHATS = paramtext
+       elif parametros[0].upper()=='MAX_MSG_LOAD':
+          MAX_MSG_LOAD = paramtext
+       elif parametros[0].upper()=='MAX_MSG_LOAD_AUTO':
+          MAX_MSG_LOAD_AUTO = paramtext
+       elif parametros[0].upper()=='MAX_SIZE_DOWN':
+          MAX_SIZE_DOWN = paramtext
+       elif parametros[0].upper()=='MIN_SIZE_DOWN':
+          MIN_SIZE_DOWN = paramtext
+       else:
+          replies.add(text = 'Unknown setting!, available settings below', html = available_settings)
+          return
+       bot.set(parametros[0].upper(), paramtext)
+       if DBXTOKEN:
+          backup_db()
+       replies.add(text = 'Setting '+parametros[0]+' set to '+str(paramtext)+' successfully!')
 
 @simplebot.command(admin=True)
 def stats(replies) -> None:
